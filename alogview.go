@@ -34,6 +34,9 @@ type logLine struct {
 	message string
 }
 
+// filter function type, it receives a parsed log line and returns bool if it will be logged
+type filter func(*logLine) bool
+
 var pslineMatcher *regexp.Regexp
 var loglineMatcher *regexp.Regexp
 var startprocMatcher *regexp.Regexp
@@ -59,13 +62,19 @@ func init() {
 
 func main() {
 	if len(os.Args) == 1 {
-		logAll()
+		processLogs(func (line *logLine) bool { return true })
 	} else {
-		logPackages(os.Args)
+		packages := make(map[string]bool)
+
+		for _, pkg := range os.Args {
+			packages[pkg] = true
+		}
+		pids := getProcs(packages)
+		processLogs(func (line *logLine) bool { return filterByPackages(line, packages, pids) })
 	}
 }
 
-func logAll() {
+func processLogs(filter filter) {
 	r, w := io.Pipe()
 
 	go runADB(w, "logcat")
@@ -84,8 +93,44 @@ func logAll() {
 
 			continue
 		}
-		fmt.Println(colorForLevel(msg.level), line, reset)
+		if filter(msg) {
+			fmt.Println(colorForLevel(msg.level), line, reset)
+		}
 	}
+}
+
+func colorForLevel(level string) string {
+	s := ""
+
+	switch level {
+	case "V":
+		s = termfg(white)
+	case "D":
+		s = termfg(cyan)
+	case "I":
+		s = termfg(green)
+	case "W":
+		s = termfg(yellow)
+	case "E":
+		s = termfg(red)
+	case "F":
+		s = termfg(magenta)
+	}
+
+	return s
+}
+
+func termfg(fg color) string {
+	return fmt.Sprintf("\033[3%dm", fg)
+}
+
+func fatal(msg ...interface{}) {
+	warn(msg...)
+	os.Exit(1)
+}
+
+func warn(msg ...interface{}) {
+	fmt.Fprintln(os.Stderr, msg...)
 }
 
 func runADB(out io.WriteCloser, args ...string) {
@@ -102,14 +147,30 @@ func runADB(out io.WriteCloser, args ...string) {
 	}
 }
 
-func logPackages(pkgs []string) {
-	packages := make(map[string]bool)
+func parseLine(line string) (*logLine, error) {
+	if parsed := loglineMatcher.FindStringSubmatch(line); parsed != nil {
+		pid, e1 := strconv.Atoi(parsed[2])
 
-	for _, pkg := range pkgs {
-		packages[pkg] = true
+		if e1 != nil {
+			return nil, e1
+		}
+
+		tid, e2 := strconv.Atoi(parsed[3])
+
+		if e2 != nil {
+			return nil, e2
+		}
+
+		return &logLine{
+			time:    parsed[1],
+			pid:     pid,
+			tid:     tid,
+			level:   parsed[4],
+			tag:     strings.TrimSpace(parsed[5]),
+			message: parsed[6]}, nil
 	}
-	pids := getProcs(packages)
-	parseLogs(packages, pids)
+
+	return nil, fmt.Errorf("failed to match log line \"%s\"", line)
 }
 
 func getProcs(packages map[string]bool) map[int]bool {
@@ -149,121 +210,42 @@ func atoi(str string) int {
 	return i
 }
 
-func parseLogs(packages map[string]bool, pids map[int]bool) {
-	r, w := io.Pipe()
+func filterByPackages(line *logLine, packages map[string]bool, pids map[int]bool) bool {
+	if line.tag == "ActivityManager" && line.level == "I" {
+		// start proc
+		if parsedmsg := startprocMatcher.FindStringSubmatch(line.message); parsedmsg != nil {
+			pid := atoi(parsedmsg[1])
+			pkg := parsedmsg[2]
 
-	go runADB(w, "logcat")
+			if packages[pkg] {
+				pids[pid] = true
 
-	scanner := bufio.NewScanner(r)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "--------- beginning of") {
-			continue
-		}
-		parsedline, err := parseLine(line)
-
-		if err != nil {
-			warn(err)
-			continue
-		}
-		if parsedline.tag == "ActivityManager" && parsedline.level == "I" {
-			// start proc
-			if parsedmsg := startprocMatcher.FindStringSubmatch(parsedline.message); parsedmsg != nil {
-				pid := atoi(parsedmsg[1])
-				pkg := parsedmsg[2]
-
-				if packages[pkg] {
-					pids[pid] = true
-					fmt.Println(colorForLevel(parsedline.level), line, reset)
-				}
-			}
-			// proc died
-			if parsedmsg := diedprocMatcher.FindStringSubmatch(parsedline.message); parsedmsg != nil {
-				pkg := parsedmsg[1]
-				pid := atoi(parsedmsg[2])
-
-				if packages[pkg] || pids[pid] {
-					pids[pid] = false
-					fmt.Println(colorForLevel(parsedline.level), line, reset)
-				}
-			}
-			// proc killed
-			if parsedmsg := killprocMatcher.FindStringSubmatch(parsedline.message); parsedmsg != nil {
-				pid := atoi(parsedmsg[1])
-				pkg := parsedmsg[2]
-
-				if packages[pkg] || pids[pid] {
-					pids[pid] = false
-					fmt.Println(colorForLevel(parsedline.level), line, reset)
-				}
+				return true
 			}
 		}
-		if pids[parsedline.pid] {
-			fmt.Println(colorForLevel(parsedline.level), line, reset)
+		// proc died
+		if parsedmsg := diedprocMatcher.FindStringSubmatch(line.message); parsedmsg != nil {
+			pkg := parsedmsg[1]
+			pid := atoi(parsedmsg[2])
+
+			if packages[pkg] || pids[pid] {
+				delete(pids, pid)
+
+				return true
+			}
+		}
+		// proc killed
+		if parsedmsg := killprocMatcher.FindStringSubmatch(line.message); parsedmsg != nil {
+			pid := atoi(parsedmsg[1])
+			pkg := parsedmsg[2]
+
+			if packages[pkg] || pids[pid] {
+				delete(pids, pid)
+
+				return true
+			}
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		fatal(err)
-	}
-}
 
-func parseLine(line string) (*logLine, error) {
-	if parsed := loglineMatcher.FindStringSubmatch(line); parsed != nil {
-		pid, e1 := strconv.Atoi(parsed[2])
-
-		if e1 != nil {
-			return nil, e1
-		}
-
-		tid, e2 := strconv.Atoi(parsed[3])
-
-		if e2 != nil {
-			return nil, e2
-		}
-
-		return &logLine{
-			time:    parsed[1],
-			pid:     pid,
-			tid:     tid,
-			level:   parsed[4],
-			tag:     strings.TrimSpace(parsed[5]),
-			message: parsed[6]}, nil
-	}
-
-	return nil, fmt.Errorf("failed to match log line \"%s\"", line)
-}
-
-func colorForLevel(level string) string {
-	s := ""
-
-	switch level {
-	case "V":
-		s = termfg(white)
-	case "D":
-		s = termfg(cyan)
-	case "I":
-		s = termfg(green)
-	case "W":
-		s = termfg(yellow)
-	case "E":
-		s = termfg(red)
-	case "F":
-		s = termfg(magenta)
-	}
-
-	return s
-}
-
-func termfg(fg color) string {
-	return fmt.Sprintf("\033[3%dm", fg)
-}
-
-func fatal(msg ...interface{}) {
-	warn(msg...)
-	os.Exit(1)
-}
-
-func warn(msg ...interface{}) {
-	fmt.Fprintln(os.Stderr, msg...)
+	return pids[line.pid]
 }
