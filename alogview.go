@@ -58,16 +58,58 @@ func init() {
 }
 
 func main() {
-	r, w := io.Pipe()
-	packages := make(map[string]bool)
-	var pids map[int]bool
+	if len(os.Args) == 1 {
+		logAll()
+	} else {
+		logPackages(os.Args)
+	}
+}
 
-	for _, pkg := range os.Args {
+func logAll() {
+	r, w := io.Pipe()
+
+	go runADB(w, "logcat")
+
+	scanner := bufio.NewScanner(r)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "--------- beginning of") {
+			continue
+		}
+		msg, err := parseLine(line)
+
+		if err != nil {
+			warn(err)
+
+			continue
+		}
+		fmt.Println(colorForLevel(msg.level), line, reset)
+	}
+}
+
+func runADB(out io.WriteCloser, args ...string) {
+	cmd := exec.Command("adb", args...)
+
+	cmd.Stdout = out
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		fatal(err)
+	}
+	if err := out.Close(); err != nil {
+		fatal(err)
+	}
+}
+
+func logPackages(pkgs []string) {
+	packages := make(map[string]bool)
+
+	for _, pkg := range pkgs {
 		packages[pkg] = true
 	}
-	pids = getProcs(packages)
-	go runADB(w, "logcat")
-	parseLogs(r, packages, pids)
+	pids := getProcs(packages)
+	parseLogs(packages, pids)
 }
 
 func getProcs(packages map[string]bool) map[int]bool {
@@ -97,20 +139,6 @@ func getProcs(packages map[string]bool) map[int]bool {
 	return pids
 }
 
-func runADB(out io.WriteCloser, args ...string) {
-	cmd := exec.Command("adb", args...)
-
-	cmd.Stdout = out
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		fatal(err)
-	}
-	if err := out.Close(); err != nil {
-		fatal(err)
-	}
-}
-
 func atoi(str string) int {
 	i, err := strconv.Atoi(str)
 
@@ -121,8 +149,12 @@ func atoi(str string) int {
 	return i
 }
 
-func parseLogs(in io.Reader, packages map[string]bool, pids map[int]bool) {
-	scanner := bufio.NewScanner(in)
+func parseLogs(packages map[string]bool, pids map[int]bool) {
+	r, w := io.Pipe()
+
+	go runADB(w, "logcat")
+
+	scanner := bufio.NewScanner(r)
 
 	for scanner.Scan() {
 		line := scanner.Text()
