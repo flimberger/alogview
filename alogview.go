@@ -94,7 +94,7 @@ func processLogs(filter filter) {
 			continue
 		}
 		if filter(msg) {
-			fmt.Println(colorForLevel(msg.level), line, reset)
+			fmt.Printf("%s%s%s\n", colorForLevel(msg.level), line, reset)
 		}
 	}
 }
