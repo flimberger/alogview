@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -37,11 +38,16 @@ type logLine struct {
 // filter function type, it receives a parsed log line and returns bool if it will be logged
 type filter func(*logLine) bool
 
-var pslineMatcher *regexp.Regexp
-var loglineMatcher *regexp.Regexp
-var startprocMatcher *regexp.Regexp
-var diedprocMatcher *regexp.Regexp
-var killprocMatcher *regexp.Regexp
+var (
+	pslineMatcher    *regexp.Regexp
+	loglineMatcher   *regexp.Regexp
+	startprocMatcher *regexp.Regexp
+	diedprocMatcher  *regexp.Regexp
+	killprocMatcher  *regexp.Regexp
+
+	// global store for additional ADB options
+	adbargs []string
+)
 
 func init() {
 	// The line pattern is "${user} ${pid} ${ppid} ${vsz} $rss} ${wchan} ${addr} ${s} ${name}"
@@ -61,8 +67,23 @@ func init() {
 }
 
 func main() {
-	if len(os.Args) == 1 {
-		processLogs(func (line *logLine) bool { return true })
+	d := flag.Bool("d", false, "use USB device (error if multiple devices connected)")
+	e := flag.Bool("e", false, "use TCP/IP device (error if multiple TCP/IP devices available)")
+	flag.Parse()
+	if *d && *e {
+		fmt.Fprintln(os.Stderr, "invalid parameters: -e and -d must not be specified both")
+		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+	if *d {
+		adbargs = append(adbargs, "-d")
+	}
+	if *e {
+		adbargs = append(adbargs, "-e")
+	}
+	if len(flag.Args()) == 0 {
+		processLogs(func(line *logLine) bool { return true })
 	} else {
 		packages := make(map[string]bool)
 
@@ -70,7 +91,7 @@ func main() {
 			packages[pkg] = true
 		}
 		pids := getProcs(packages)
-		processLogs(func (line *logLine) bool { return filterByPackages(line, packages, pids) })
+		processLogs(func(line *logLine) bool { return filterByPackages(line, packages, pids) })
 	}
 }
 
@@ -134,6 +155,7 @@ func warn(msg ...interface{}) {
 }
 
 func runADB(out io.WriteCloser, args ...string) {
+	args = append(adbargs, args...)
 	cmd := exec.Command("adb", args...)
 
 	cmd.Stdout = out
