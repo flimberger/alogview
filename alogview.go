@@ -86,8 +86,9 @@ func main() {
 	if len(*s) > 0 {
 		adbargs = append(adbargs, "-s", *s)
 	}
+	_, suppresscolor := os.LookupEnv("NO_COLOR")
 	if len(flag.Args()) == 0 {
-		processLogs(func(line *logLine) bool { return true })
+		processLogs(func(line *logLine) bool { return true }, suppresscolor)
 	} else {
 		packages := make(map[string]bool)
 
@@ -95,11 +96,11 @@ func main() {
 			packages[pkg] = true
 		}
 		pids := getProcs(packages)
-		processLogs(func(line *logLine) bool { return filterByPackages(line, packages, pids) })
+		processLogs(func(line *logLine) bool { return filterByPackages(line, packages, pids) }, suppresscolor)
 	}
 }
 
-func processLogs(filter filter) {
+func processLogs(filter filter, suppresscolor bool) {
 	r, w := io.Pipe()
 
 	go runADB(w, "logcat")
@@ -119,7 +120,11 @@ func processLogs(filter filter) {
 			continue
 		}
 		if filter(msg) {
-			fmt.Printf("%s%s%s\n", colorForLevel(msg.level), line, reset)
+			if suppresscolor {
+				fmt.Printf("%s\n", line)
+			} else {
+				fmt.Printf("%s%s%s\n", colorForLevel(msg.level), line, reset)
+			}
 		}
 	}
 }
