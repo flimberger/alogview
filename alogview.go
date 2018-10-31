@@ -69,6 +69,7 @@ func init() {
 func main() {
 	d := flag.Bool("d", false, "use USB device (error if multiple devices connected)")
 	e := flag.Bool("e", false, "use TCP/IP device (error if multiple TCP/IP devices available)")
+	s := flag.String("s", "", "use device with given serial (overrides $ANDROID_SERIAL)")
 	flag.Parse()
 	if *d && *e {
 		fmt.Fprintln(os.Stderr, "invalid parameters: -e and -d must not be specified both")
@@ -81,6 +82,9 @@ func main() {
 	}
 	if *e {
 		adbargs = append(adbargs, "-e")
+	}
+	if len(*s) > 0 {
+		adbargs = append(adbargs, "-s", *s)
 	}
 	if len(flag.Args()) == 0 {
 		processLogs(func(line *logLine) bool { return true })
