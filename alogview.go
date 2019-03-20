@@ -46,6 +46,7 @@ var (
 	killprocMatcher  *regexp.Regexp
 
 	// global store for additional ADB options
+	adbcmd string = "adb"
 	adbargs []string
 )
 
@@ -85,6 +86,13 @@ func main() {
 	}
 	if len(*s) > 0 {
 		adbargs = append(adbargs, "-s", *s)
+	}
+	adbenv, adbOverride := os.LookupEnv("ADB")
+	if adbOverride {
+		if len(adbenv) == 0 {
+			fatal("ADB environment variable must not be set to empty string")
+		}
+		adbcmd = adbenv
 	}
 	_, suppresscolor := os.LookupEnv("NO_COLOR")
 	if len(flag.Args()) == 0 {
@@ -165,7 +173,7 @@ func warn(msg ...interface{}) {
 
 func runADB(out io.WriteCloser, args ...string) {
 	args = append(adbargs, args...)
-	cmd := exec.Command("adb", args...)
+	cmd := exec.Command(adbcmd, args...)
 
 	cmd.Stdout = out
 	cmd.Stderr = os.Stderr
