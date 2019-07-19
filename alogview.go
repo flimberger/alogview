@@ -46,7 +46,7 @@ var (
 	killprocMatcher  *regexp.Regexp
 
 	// global store for additional ADB options
-	adbcmd string = "adb"
+	adbcmd  string = "adb"
 	adbargs []string
 )
 
@@ -70,13 +70,15 @@ func init() {
 func main() {
 	d := flag.Bool("d", false, "use USB device (error if multiple devices connected)")
 	e := flag.Bool("e", false, "use TCP/IP device (error if multiple TCP/IP devices available)")
+	h := flag.Bool("h", false, "show this help message")
 	s := flag.String("s", "", "use device with given serial (overrides $ANDROID_SERIAL)")
 	flag.Parse()
+	if *h {
+		usage()
+	}
 	if *d && *e {
 		fmt.Fprintln(os.Stderr, "invalid parameters: -e and -d must not be specified both")
-		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
-		flag.PrintDefaults()
-		os.Exit(1)
+		usage()
 	}
 	if *d {
 		adbargs = append(adbargs, "-d")
@@ -106,6 +108,12 @@ func main() {
 		pids := getProcs(packages)
 		processLogs(func(line *logLine) bool { return filterByPackages(line, packages, pids) }, suppresscolor)
 	}
+}
+
+func usage() {
+	fmt.Fprintf(os.Stderr, "usage:\t%s [-d|-e] [-s serial] [packagename]\n", os.Args[0])
+	flag.PrintDefaults()
+	os.Exit(1)
 }
 
 func processLogs(filter filter, suppresscolor bool) {
