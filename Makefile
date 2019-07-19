@@ -1,12 +1,14 @@
-# Tools
-GOTOOL?=	go
-INSTALL?=	install
+PROG=	alogview
+MAN=	${PROG}.1
 
 # Locations
 DESTDIR?=	/usr/local
 BINDIR?=	/bin
+MANDIR?=	/share/man/man1
 
-PROG=	alogview
+# Tools
+GOTOOL?=	go
+INSTALL?=	install
 
 all: ${PROG}
 
@@ -15,8 +17,12 @@ ${PROG}: *.go
 
 install: ${PROG}
 	install -C ${PROG} ${DESTDIR}${BINDIR}/${PROG}
+	install -C ${MAN} ${DESTDIR}${MANDIR}/${MAN}
 
 clean:
 	rm -f ${PROG}
 
-.PHONY: all install clean
+manlint: ${MAN}
+	mandoc -Tlint ${MAN}
+
+.PHONY: all install clean manlint

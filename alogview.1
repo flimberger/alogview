@@ -1,0 +1,66 @@
+.\"Copyright (c) 2019 Florian Limberger <flo@snakeoilproductions.net>
+.\"
+.\"Permission to use, copy, modify, and distribute this software for any
+.\"purpose with or without fee is hereby granted, provided that the above
+.\"copyright notice and this permission notice appear in all copies.
+.\"
+.\"THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+.\"WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+.\"MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+.\"ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+.\"WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+.\"ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+.\"OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+.Dd $Mdocdate: July 19 2019$
+.Dt ALOGVIEW 1
+.Os
+.Sh NAME
+.Nm alogview
+.Nd colourise and filter adb logcat output
+.Sh SYNOPSIS
+.Nm alogview
+.Op Fl d
+.Op Fl e
+.Op Fl d Ar serial
+.Op packagename
+.Sh DESCRIPTION
+The
+.Nm
+utility colourises and filters the output of adb logcat to only display messages
+from the specified package.
+It takes the following arguments:
+.Bl -tag -width Ds
+.It Fl d
+Use the USB device.
+If multiple USB devices are attached,
+an error is issued.
+.It Fl e
+Use the TCP/IP device.
+If multiple USB devices are attached,
+an error is issued.
+.It Fl s Ar serial
+Use the device with the given serial string.
+.El
+.Sh ENVIRONMENT
+.Bl -tag -width Ds
+.It Ev ADB
+Contains the path of the
+.Ic adb
+executable.
+.It Ev ANDROID_SERIAL
+Contains the serial string of the Android device selected by
+.Ic adb .
+.El
+.Sh EXIT STATUS
+.Ex -std alogview
+Usually,
+errors are results of incorrect flag combinations,
+or unexpected behaviour of the
+.Ic adb
+process.
+.Sh AUTHORS
+.An -nosplit
+.An Florian Limberger Aq Mt flo@snakeoilproductions.net .
+.Sh BUGS
+.Nm
+sometimes exits unexpectedly.
