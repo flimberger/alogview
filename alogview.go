@@ -97,17 +97,17 @@ func main() {
 		adbcmd = adbenv
 	}
 	_, suppresscolor := os.LookupEnv("NO_COLOR")
-	if len(flag.Args()) == 0 {
-		processLogs(func(line *logLine) bool { return true }, suppresscolor)
-	} else {
+	filters := make([]filter, 0)
+	if len(flag.Args()) > 0 {
 		packages := make(map[string]bool)
 
 		for _, pkg := range os.Args {
 			packages[pkg] = true
 		}
 		pids := getProcs(packages)
-		processLogs(func(line *logLine) bool { return filterByPackages(line, packages, pids) }, suppresscolor)
+		filters = append(filters, func(line *logLine) bool { return filterByPackages(line, packages, pids) })
 	}
+	processLogs(filters, suppresscolor)
 }
 
 func usage() {
@@ -116,7 +116,7 @@ func usage() {
 	os.Exit(1)
 }
 
-func processLogs(filter filter, suppresscolor bool) {
+func processLogs(filters []filter, suppresscolor bool) {
 	r, w := io.Pipe()
 
 	go runADB(w, "logcat")
@@ -135,7 +135,14 @@ func processLogs(filter filter, suppresscolor bool) {
 
 			continue
 		}
-		if filter(msg) {
+		printline := true
+		for _, filter := range filters {
+			printline = filter(msg)
+			if !printline {
+				break
+			}
+		}
+		if printline {
 			if suppresscolor {
 				fmt.Printf("%s\n", line)
 			} else {
