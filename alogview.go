@@ -12,6 +12,11 @@ import (
 	"strings"
 )
 
+// Custom type for multiple flags
+type stringSetValue struct {
+	values map[string]bool
+}
+
 type color int
 
 const (
@@ -72,6 +77,8 @@ func main() {
 	e := flag.Bool("e", false, "use TCP/IP device (error if multiple TCP/IP devices available)")
 	h := flag.Bool("h", false, "show this help message")
 	s := flag.String("s", "", "use device with given serial (overrides $ANDROID_SERIAL)")
+	tags := newStringSetValue()
+	flag.Var(tags, "t", "list of tags")
 	flag.Parse()
 	if *h {
 		usage()
@@ -98,6 +105,9 @@ func main() {
 	}
 	_, suppresscolor := os.LookupEnv("NO_COLOR")
 	filters := make([]filter, 0)
+	if len(tags.values) > 0 {
+		filters = append(filters, func(line *logLine) bool { return filterByTags(line, tags.values) })
+	}
 	if len(flag.Args()) > 0 {
 		packages := make(map[string]bool)
 
@@ -264,6 +274,13 @@ func atoi(str string) int {
 	return i
 }
 
+func filterByTags(line *logLine, tags map[string]bool) bool {
+	if tags[line.tag] {
+		return true
+	}
+	return false
+}
+
 func filterByPackages(line *logLine, packages map[string]bool, pids map[int]bool) bool {
 	if line.tag == "ActivityManager" && line.level == "I" {
 		// start proc
@@ -302,4 +319,27 @@ func filterByPackages(line *logLine, packages map[string]bool, pids map[int]bool
 	}
 
 	return pids[line.pid]
+}
+
+func newStringSetValue() *stringSetValue {
+	return &stringSetValue{
+		values: make(map[string]bool),
+	}
+}
+
+func (p *stringSetValue) String() string {
+	accu := ""
+	for k, _ := range p.values {
+		accu += k + ", "
+	}
+	return strings.TrimRight(accu, ", ")
+}
+
+func (p *stringSetValue) Set(value string) error {
+	p.values[value] = true
+	return nil
+}
+
+func (p *stringSetValue) Get() interface{} {
+	return p.values
 }
