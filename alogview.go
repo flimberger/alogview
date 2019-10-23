@@ -51,7 +51,7 @@ var (
 	killprocMatcher  *regexp.Regexp
 
 	// global store for additional ADB options
-	adbcmd  string = "adb"
+	adbcmd  = "adb"
 	adbargs []string
 )
 
@@ -329,7 +329,7 @@ func newStringSetValue() *stringSetValue {
 
 func (p *stringSetValue) String() string {
 	accu := ""
-	for k, _ := range p.values {
+	for k := range p.values {
 		accu += k + ", "
 	}
 	return strings.TrimRight(accu, ", ")
