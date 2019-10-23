@@ -8,6 +8,7 @@ MANDIR?=	/share/man/man1
 
 # Tools
 GOTOOL?=	go
+GOLINT?=	golint
 INSTALL?=	install
 
 all: ${PROG}
@@ -22,7 +23,15 @@ install: ${PROG}
 clean:
 	rm -f ${PROG}
 
-manlint: ${MAN}
+lint: golint manlint
+
+golint:
+	${GOLINT}
+
+manlint:
 	mandoc -Tlint ${MAN}
 
-.PHONY: all install clean manlint
+fmt:
+	${GOTOOL} fmt
+
+.PHONY: all install clean lint golint manlint fmt
