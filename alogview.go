@@ -32,6 +32,7 @@ const (
 const reset = "\033[0m"
 
 type logLine struct {
+	raw     string
 	time    string
 	pid     int
 	tid     int
@@ -42,6 +43,9 @@ type logLine struct {
 
 // filter function type, it receives a parsed log line and returns bool if it will be logged
 type filter func(*logLine) bool
+
+// printer function type
+type printer func(*logLine)
 
 var (
 	pslineMatcher    *regexp.Regexp
@@ -117,7 +121,11 @@ func main() {
 		pids := getProcs(packages)
 		filters = append(filters, func(line *logLine) bool { return filterByPackages(line, packages, pids) })
 	}
-	processLogs(filters, suppresscolor)
+	printerf := func(line *logLine) { fmt.Printf("%s%s%s\n", colorForLevel(line.level), line.raw, reset) }
+	if suppresscolor {
+		printerf = func(line *logLine) { fmt.Printf("%s\n", line.raw) }
+	}
+	processLogs(filters, printerf)
 }
 
 func usage() {
@@ -126,11 +134,15 @@ func usage() {
 	os.Exit(1)
 }
 
-func processLogs(filters []filter, suppresscolor bool) {
+func processLogs(filters []filter, printerf printer) {
 	r, w := io.Pipe()
 
 	go runADB(w, "logcat")
+	filterLogs(r, filters, printerf)
 
+}
+
+func filterLogs(r io.Reader, filters []filter, printerf printer) {
 	scanner := bufio.NewScanner(r)
 
 	for scanner.Scan() {
@@ -153,11 +165,7 @@ func processLogs(filters []filter, suppresscolor bool) {
 			}
 		}
 		if printline {
-			if suppresscolor {
-				fmt.Printf("%s\n", line)
-			} else {
-				fmt.Printf("%s%s%s\n", colorForLevel(msg.level), line, reset)
-			}
+			printerf(msg)
 		}
 	}
 }
@@ -226,6 +234,7 @@ func parseLine(line string) (*logLine, error) {
 		}
 
 		return &logLine{
+			raw:     line,
 			time:    parsed[1],
 			pid:     pid,
 			tid:     tid,
