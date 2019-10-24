@@ -11,7 +11,7 @@ GOTOOL?=	go
 GOLINT?=	golint
 INSTALL?=	install
 
-all: ${PROG}
+all: ${PROG} test
 
 ${PROG}: *.go
 	${GOTOOL} build -o ${PROG}
@@ -34,4 +34,7 @@ manlint:
 fmt:
 	${GOTOOL} fmt
 
-.PHONY: all install clean lint golint manlint fmt
+test:
+	${GOTOOL} test
+
+.PHONY: all install clean lint golint manlint fmt test
