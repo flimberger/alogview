@@ -119,6 +119,9 @@ func main() {
 			packages[pkg] = true
 		}
 		pids := getProcs(packages)
+		if len(pids) == 0 {
+			warn("no packages found matching the given package(s)")
+		}
 		filters = append(filters, func(line *logLine) bool { return filterByPackages(line, packages, pids) })
 	}
 	printerf := func(line *logLine) { fmt.Printf("%s%s%s\n", colorForLevel(line.level), line.raw, reset) }
