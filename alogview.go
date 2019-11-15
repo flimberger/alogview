@@ -60,8 +60,8 @@ var (
 )
 
 func init() {
-	// The line pattern is "${user} ${pid} ${ppid} ${vsz} $rss} ${wchan} ${addr} ${s} ${name}"
-	pslineMatcher = regexp.MustCompile(`\w+\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\d+\s+\w+\s+[A-Z]\s+(.*)$`)
+	// The line pattern is "${user:w} ${pid:d} ${ppid:d} ${vsz:d} ${rss:d} ${wchan:w} ${addr:w} ${s:w} ${name:w}"
+	pslineMatcher = regexp.MustCompile(`\w+\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\w+\s+\w+\s+[A-Z]\s+(.*)$`)
 
 	// The line pattern is "${datetime} ${pid} ${tid} ${level} ${tag}: ${message}"
 	// the datetime is in the format "MM-DD hh:mm:ss.sss"
