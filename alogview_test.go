@@ -15,24 +15,32 @@ func runFilters(data string, filters []filter) []*logLine {
 	acc := []*logLine{}
 	rawlines := make(chan *logLine)
 	filtered := startFilters(filters, rawlines)
+	done := make(chan int)
 	go func() {
 		for {
-			acc = append(acc, <-filtered)
+			select {
+			case line := <-filtered:
+				acc = append(acc, line)
+			case <-done:
+				done <- 1
+			}
 		}
 	}()
 	parseLogs(r, rawlines)
-	// TODO: this is racy
+	done <- 1
+	<-done
 	return acc
 }
 
-func processFilter(out chan<- *logLine, in <-chan *logLine) {
-	packages := map[string]bool{"foo": true}
-	pids := map[int]bool{123: true}
-	filterByPackages(out, in, packages, pids)
+func createPackageFilter() *packageFilter {
+	return &packageFilter{
+		packages: map[string]bool{"foo": true},
+		pids:     map[int]bool{123: true},
+	}
 }
 
 func TestProcessFiltering(t *testing.T) {
-	filters := []filter{processFilter}
+	filters := []filter{createPackageFilter()}
 	acc := runFilters(testLog, filters)
 	// TODO: this is racy
 	if len(acc) != 2 {
@@ -51,13 +59,14 @@ func assertProcLine(t *testing.T, line *logLine, pid int, msg string) {
 	}
 }
 
-func tagFilter(out chan<- *logLine, in <-chan *logLine) {
-	tags := map[string]bool{"TestTag1": true}
-	filterByTags(out, in, tags)
+func createTagFilter() *tagFilter {
+	return &tagFilter{
+		tags: map[string]bool{"TestTag1": true},
+	}
 }
 
 func TestTagFiltering(t *testing.T) {
-	filters := []filter{tagFilter}
+	filters := []filter{createTagFilter()}
 	acc := runFilters(testLog, filters)
 	if len(acc) != 2 {
 		t.Errorf("expected two log entries, got %d instead", len(acc))
@@ -76,7 +85,7 @@ func assertTagLine(t *testing.T, line *logLine, tag string, msg string) {
 }
 
 func TestProcessAndTagFiltering(t *testing.T) {
-	filters := []filter{processFilter, tagFilter}
+	filters := []filter{createPackageFilter(), createTagFilter()}
 	acc := runFilters(testLog, filters)
 	if len(acc) != 1 {
 		t.Errorf("Expected a single log entry, got %d instead", len(acc))

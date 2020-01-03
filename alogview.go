@@ -41,10 +41,19 @@ type logLine struct {
 	message string
 }
 
-// filter function type
-// the filter functions are run as goroutines and receive loglines via a channel
-// if the filter passes a logline on, it sends them on its output channel
-type filter func(chan<- *logLine, <-chan *logLine)
+// A filter implements the `filter()` method, which is expected to run as a goroutine.
+type filter interface {
+	filter(chan<- *logLine, <-chan *logLine)
+}
+
+type packageFilter struct {
+	packages map[string]bool
+	pids     map[int]bool
+}
+
+type tagFilter struct {
+	tags map[string]bool
+}
 
 var (
 	pslineMatcher    *regexp.Regexp
@@ -109,19 +118,10 @@ func main() {
 	_, suppresscolor := os.LookupEnv("NO_COLOR")
 	filters := make([]filter, 0)
 	if len(tags.values) > 0 {
-		filters = append(filters, func(out chan<- *logLine, in <-chan *logLine) { filterByTags(out, in, tags.values) })
+		filters = append(filters, newTagFilter(tags.values))
 	}
 	if len(flag.Args()) > 0 {
-		packages := make(map[string]bool)
-
-		for _, pkg := range os.Args {
-			packages[pkg] = true
-		}
-		pids := getProcs(packages)
-		if len(pids) == 0 {
-			warn("no packages found matching the given package(s)")
-		}
-		filters = append(filters, func(out chan<- *logLine, in <-chan *logLine) { filterByPackages(out, in, packages, pids) })
+		filters = append(filters, newPackageFilter(os.Args))
 	}
 
 	rawlines := make(chan *logLine)
@@ -155,9 +155,9 @@ func usage() {
 func startFilters(filters []filter, rawlines chan *logLine) <-chan *logLine {
 	linesout := rawlines
 
-	for _, filter := range filters {
+	for _, f := range filters {
 		pipe := make(chan *logLine)
-		go filter(pipe, linesout)
+		go f.filter(pipe, linesout)
 		linesout = pipe
 	}
 
@@ -269,6 +269,39 @@ func parseLine(line string) (*logLine, error) {
 	return nil, fmt.Errorf("failed to match log line \"%s\"", line)
 }
 
+// Create a new tagFilter from a list of tags.
+func newTagFilter(tags map[string]bool) *tagFilter {
+	return &tagFilter{
+		tags: tags,
+	}
+}
+
+func (tf *tagFilter) filter(out chan<- *logLine, in <-chan *logLine) {
+	for {
+		line := <-in
+		if tf.tags[line.tag] {
+			out <- line
+		}
+	}
+}
+
+// Create a packageFilter from a list of package names.
+func newPackageFilter(pkgnames []string) *packageFilter {
+	packages := make(map[string]bool)
+
+	for _, pkg := range pkgnames {
+		packages[pkg] = true
+	}
+	pids := getProcs(packages)
+	if len(pids) == 0 {
+		warn("no packages found matching the given package(s)")
+	}
+	return &packageFilter{
+		packages: packages,
+		pids:     pids,
+	}
+}
+
 // Execute `adb shell ps` and parse the output to get a list of currently running processes; return the process IDs.
 func getProcs(packages map[string]bool) map[int]bool {
 	r, w := io.Pipe()
@@ -307,16 +340,7 @@ func atoi(str string) int {
 	return i
 }
 
-func filterByTags(out chan<- *logLine, in <-chan *logLine, tags map[string]bool) {
-	for {
-		line := <-in
-		if tags[line.tag] {
-			out <- line
-		}
-	}
-}
-
-func filterByPackages(out chan<- *logLine, in <-chan *logLine, packages map[string]bool, pids map[int]bool) bool {
+func (pf *packageFilter) filter(out chan<- *logLine, in <-chan *logLine) {
 	for {
 		line := <-in
 		if line.tag == "ActivityManager" && line.level == "I" {
@@ -325,10 +349,11 @@ func filterByPackages(out chan<- *logLine, in <-chan *logLine, packages map[stri
 				pid := atoi(parsedmsg[1])
 				pkg := parsedmsg[2]
 
-				if packages[pkg] {
-					pids[pid] = true
+				if pf.packages[pkg] {
+					pf.pids[pid] = true
 
 					out <- line
+					continue
 				}
 			}
 			// proc died
@@ -336,10 +361,11 @@ func filterByPackages(out chan<- *logLine, in <-chan *logLine, packages map[stri
 				pkg := parsedmsg[1]
 				pid := atoi(parsedmsg[2])
 
-				if packages[pkg] || pids[pid] {
-					delete(pids, pid)
+				if pf.packages[pkg] || pf.pids[pid] {
+					delete(pf.pids, pid)
 
 					out <- line
+					continue
 				}
 			}
 			// proc killed
@@ -347,13 +373,13 @@ func filterByPackages(out chan<- *logLine, in <-chan *logLine, packages map[stri
 				pid := atoi(parsedmsg[1])
 				pkg := parsedmsg[2]
 
-				if packages[pkg] || pids[pid] {
-					delete(pids, pid)
+				if pf.packages[pkg] || pf.pids[pid] {
+					delete(pf.pids, pid)
 
 					out <- line
 				}
 			}
-		} else if pids[line.pid] {
+		} else if pf.pids[line.pid] {
 			out <- line
 		}
 	}
