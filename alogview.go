@@ -41,11 +41,19 @@ type logLine struct {
 	message string
 }
 
-// filter function type, it receives a parsed log line and returns bool if it will be logged
-type filter func(*logLine) bool
+// A filter implements the `filter()` method, which is expected to run as a goroutine.
+type filter interface {
+	filter(chan<- *logLine, <-chan *logLine)
+}
 
-// printer function type
-type printer func(*logLine)
+type packageFilter struct {
+	packages map[string]bool
+	pids     map[int]bool
+}
+
+type tagFilter struct {
+	tags map[string]bool
+}
 
 var (
 	pslineMatcher    *regexp.Regexp
@@ -110,25 +118,31 @@ func main() {
 	_, suppresscolor := os.LookupEnv("NO_COLOR")
 	filters := make([]filter, 0)
 	if len(tags.values) > 0 {
-		filters = append(filters, func(line *logLine) bool { return filterByTags(line, tags.values) })
+		filters = append(filters, newTagFilter(tags.values))
 	}
 	if len(flag.Args()) > 0 {
-		packages := make(map[string]bool)
+		filters = append(filters, newPackageFilter(os.Args))
+	}
 
-		for _, pkg := range os.Args {
-			packages[pkg] = true
+	rawlines := make(chan *logLine)
+	filtered := startFilters(filters, rawlines)
+
+	go func() {
+		if suppresscolor {
+			for {
+				line := <-filtered
+				fmt.Printf("%s\n", line.raw)
+			}
+		} else {
+			for {
+				line := <-filtered
+				fmt.Printf("%s%s%s\n", colorForLevel(line.level), line.raw, reset)
+			}
 		}
-		pids := getProcs(packages)
-		if len(pids) == 0 {
-			warn("no packages found matching the given package(s)")
-		}
-		filters = append(filters, func(line *logLine) bool { return filterByPackages(line, packages, pids) })
-	}
-	printerf := func(line *logLine) { fmt.Printf("%s%s%s\n", colorForLevel(line.level), line.raw, reset) }
-	if suppresscolor {
-		printerf = func(line *logLine) { fmt.Printf("%s\n", line.raw) }
-	}
-	processLogs(filters, printerf)
+	}()
+
+	r := startLogCollection()
+	parseLogs(r, rawlines)
 }
 
 func usage() {
@@ -137,15 +151,29 @@ func usage() {
 	os.Exit(1)
 }
 
-func processLogs(filters []filter, printerf printer) {
+// Start all filter functions as goroutines, with channels set up between them to send log lines down the chain.
+func startFilters(filters []filter, rawlines chan *logLine) <-chan *logLine {
+	linesout := rawlines
+
+	for _, f := range filters {
+		pipe := make(chan *logLine)
+		go f.filter(pipe, linesout)
+		linesout = pipe
+	}
+
+	return linesout
+}
+
+// Start an adb instance and return the reader end of the pipe.
+func startLogCollection() io.Reader {
 	r, w := io.Pipe()
 
 	go runADB(w, "logcat")
-	filterLogs(r, filters, printerf)
-
+	return r
 }
 
-func filterLogs(r io.Reader, filters []filter, printerf printer) {
+// Read log lines from the reader, parse them into a logLine struct and send them to the linesout chan.
+func parseLogs(r io.Reader, linesout chan<- *logLine) {
 	scanner := bufio.NewScanner(r)
 
 	for scanner.Scan() {
@@ -160,19 +188,11 @@ func filterLogs(r io.Reader, filters []filter, printerf printer) {
 
 			continue
 		}
-		printline := true
-		for _, filter := range filters {
-			printline = filter(msg)
-			if !printline {
-				break
-			}
-		}
-		if printline {
-			printerf(msg)
-		}
+		linesout <- msg
 	}
 }
 
+// Return the color escape code for the log level.
 func colorForLevel(level string) string {
 	s := ""
 
@@ -249,6 +269,40 @@ func parseLine(line string) (*logLine, error) {
 	return nil, fmt.Errorf("failed to match log line \"%s\"", line)
 }
 
+// Create a new tagFilter from a list of tags.
+func newTagFilter(tags map[string]bool) *tagFilter {
+	return &tagFilter{
+		tags: tags,
+	}
+}
+
+func (tf *tagFilter) filter(out chan<- *logLine, in <-chan *logLine) {
+	for {
+		line := <-in
+		if tf.tags[line.tag] {
+			out <- line
+		}
+	}
+}
+
+// Create a packageFilter from a list of package names.
+func newPackageFilter(pkgnames []string) *packageFilter {
+	packages := make(map[string]bool)
+
+	for _, pkg := range pkgnames {
+		packages[pkg] = true
+	}
+	pids := getProcs(packages)
+	if len(pids) == 0 {
+		warn("no packages found matching the given package(s)")
+	}
+	return &packageFilter{
+		packages: packages,
+		pids:     pids,
+	}
+}
+
+// Execute `adb shell ps` and parse the output to get a list of currently running processes; return the process IDs.
 func getProcs(packages map[string]bool) map[int]bool {
 	r, w := io.Pipe()
 
@@ -286,51 +340,49 @@ func atoi(str string) int {
 	return i
 }
 
-func filterByTags(line *logLine, tags map[string]bool) bool {
-	if tags[line.tag] {
-		return true
+func (pf *packageFilter) filter(out chan<- *logLine, in <-chan *logLine) {
+	for {
+		line := <-in
+		if line.tag == "ActivityManager" && line.level == "I" {
+			// start proc
+			if parsedmsg := startprocMatcher.FindStringSubmatch(line.message); parsedmsg != nil {
+				pid := atoi(parsedmsg[1])
+				pkg := parsedmsg[2]
+
+				if pf.packages[pkg] {
+					pf.pids[pid] = true
+
+					out <- line
+					continue
+				}
+			}
+			// proc died
+			if parsedmsg := diedprocMatcher.FindStringSubmatch(line.message); parsedmsg != nil {
+				pkg := parsedmsg[1]
+				pid := atoi(parsedmsg[2])
+
+				if pf.packages[pkg] || pf.pids[pid] {
+					delete(pf.pids, pid)
+
+					out <- line
+					continue
+				}
+			}
+			// proc killed
+			if parsedmsg := killprocMatcher.FindStringSubmatch(line.message); parsedmsg != nil {
+				pid := atoi(parsedmsg[1])
+				pkg := parsedmsg[2]
+
+				if pf.packages[pkg] || pf.pids[pid] {
+					delete(pf.pids, pid)
+
+					out <- line
+				}
+			}
+		} else if pf.pids[line.pid] {
+			out <- line
+		}
 	}
-	return false
-}
-
-func filterByPackages(line *logLine, packages map[string]bool, pids map[int]bool) bool {
-	if line.tag == "ActivityManager" && line.level == "I" {
-		// start proc
-		if parsedmsg := startprocMatcher.FindStringSubmatch(line.message); parsedmsg != nil {
-			pid := atoi(parsedmsg[1])
-			pkg := parsedmsg[2]
-
-			if packages[pkg] {
-				pids[pid] = true
-
-				return true
-			}
-		}
-		// proc died
-		if parsedmsg := diedprocMatcher.FindStringSubmatch(line.message); parsedmsg != nil {
-			pkg := parsedmsg[1]
-			pid := atoi(parsedmsg[2])
-
-			if packages[pkg] || pids[pid] {
-				delete(pids, pid)
-
-				return true
-			}
-		}
-		// proc killed
-		if parsedmsg := killprocMatcher.FindStringSubmatch(line.message); parsedmsg != nil {
-			pid := atoi(parsedmsg[1])
-			pkg := parsedmsg[2]
-
-			if packages[pkg] || pids[pid] {
-				delete(pids, pid)
-
-				return true
-			}
-		}
-	}
-
-	return pids[line.pid]
 }
 
 func newStringSetValue() *stringSetValue {
