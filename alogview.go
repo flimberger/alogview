@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2018-2020 Florian Limberger <flo@purplekraken.com>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
 package main
 
 import (
