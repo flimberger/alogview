@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/mattn/go-isatty"
 )
 
 // Custom type for multiple flags
@@ -116,6 +118,7 @@ func main() {
 		adbcmd = adbenv
 	}
 	_, suppresscolor := os.LookupEnv("NO_COLOR")
+	suppresscolor = suppresscolor || !isatty.IsTerminal(os.Stdout.Fd())
 	filters := make([]filter, 0)
 	if len(tags.values) > 0 {
 		filters = append(filters, newTagFilter(tags.values))
