@@ -20,15 +20,14 @@ jobs:
       uses: actions/setup-go@v3
       with:
         go-version-file: 'go.mod'
-        cache: true
       id: go
 
     - name: Get dependencies
       run: |
-        go get -v -t -d ./...
+        go get -v -t -d
 
     - name: Build
-      run: go build -v .
+      run: go build -v
 
     - name: Test
       run: go test -v .
