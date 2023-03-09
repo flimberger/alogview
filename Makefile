@@ -8,7 +8,6 @@ MANDIR?=	/share/man/man1
 
 # Tools
 GOTOOL?=	go
-GOLINT?=	golint
 INSTALL?=	install
 
 all: ${PROG} test
@@ -26,7 +25,8 @@ clean:
 lint: golint manlint
 
 golint:
-	${GOLINT}
+	gofmt -l .
+	go vet
 
 manlint:
 	mandoc -Tlint ${MAN}
