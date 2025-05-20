@@ -20,4 +20,5 @@ only log messages emitted by processes belonging to those packages are printed.
 
 `Adb` from the Android SDK is expected to be on the `PATH`.
 
-A simple `go get github.com/flimberger/alogview` is sufficient.
+A simple `go install purplekraken.com/cmd/alogview@latest` is sufficient.
+Ensure that `$GOPATH/bin` (defaults to `$HOME/go/bin`) is in our `PATH`.
