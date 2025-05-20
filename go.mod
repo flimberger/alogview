@@ -1,4 +1,4 @@
-module purplekraken.com/cmd/alogview
+module github.com/flimberger/alogview@main
 
 go 1.17
 
